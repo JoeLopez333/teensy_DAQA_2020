@@ -18,7 +18,7 @@
 uint8_t Ascale = AFS_2G, Gscale = GFS_245DPS, AODR = AODR_12_5Hz, GODR = GODR_12_5Hz;
 
 float aRes, gRes;              // scale resolutions per LSB for the accel and gyro sensor2
-float accelBias[3] = {11.8, -17.36, 17.16}, gyroBias[3] = {.61, -2.89, -0.81}; // offset biases for the accel and gyro
+float accelBias[3] = {0}, gyroBias[3] = {0};//, -2.89, -0.81}; // offset biases for the accel and gyro
 int16_t LSM6DSMData[7];        // Stores the 16-bit signed sensor output
 float   Gtemperature;           // Stores the real internal gyro temperature in degrees Celsius
 float ax, ay, az, gx, gy, gz;  // variables to hold latest accel/gyro data values 
@@ -132,7 +132,7 @@ void setup() {
   byte d = LIS2MDL.getChipID();  // Read CHIP_ID register for LSM6DSM
   Serial.print("LIS2MDL "); Serial.print("I AM "); Serial.print(d, HEX); Serial.print(" I should be "); Serial.println(0x40, HEX);
   Serial.println(" ");
-  //delay(1000); 
+  delay(1000); 
 
   LSM6DSM.reset();  
 
@@ -143,9 +143,9 @@ void setup() {
   LSM6DSM.init(Ascale, Gscale, AODR, GODR);
   LSM6DSM.selfTest();
 
-  LSM6DSM.offsetBias(gyroBias, accelBias);
-  //Serial.println("accel biases (mg)"); Serial.println(1000.0f * accelBias[0]); Serial.println(1000.0f * accelBias[1]); Serial.println(1000.0f * accelBias[2]);
-  //Serial.println("gyro biases (dps)"); Serial.println(gyroBias[0]); Serial.println(gyroBias[1]); Serial.println(gyroBias[2]);
+  //LSM6DSM.offsetBias(gyroBias, accelBias);
+  Serial.println("accel biases (mg)"); Serial.println(1000.0f * accelBias[0]); Serial.println(1000.0f * accelBias[1]); Serial.println(1000.0f * accelBias[2]);
+  Serial.println("gyro biases (dps)"); Serial.println(gyroBias[0]); Serial.println(gyroBias[1]); Serial.println(gyroBias[2]);
   delay(100); 
 
   LIS2MDL.reset(); // software reset LIS2MDL to default registers
@@ -154,12 +154,12 @@ void setup() {
    
    LIS2MDL.init(MODR);
 
-   //LIS2MDL.selfTest();
+   LIS2MDL.selfTest();
 
    //LIS2MDL.offsetBias(magBias, magScale);
-   //Serial.println("mag biases (mG)"); Serial.println(1000.0f * magBias[0]); Serial.println(1000.0f * magBias[1]); Serial.println(1000.0f * magBias[2]); 
-   //Serial.println("mag scale (mG)"); Serial.println(magScale[0]); Serial.println(magScale[1]); Serial.println(magScale[2]); 
-   //delay(2000); // add delay to see results before serial spew of data
+   Serial.println("mag biases (mG)"); Serial.println(1000.0f * magBias[0]); Serial.println(1000.0f * magBias[1]); Serial.println(1000.0f * magBias[2]); 
+   Serial.println("mag scale (mG)"); Serial.println(magScale[0]); Serial.println(magScale[1]); Serial.println(magScale[2]); 
+   delay(2000); // add delay to see results before serial spew of data
 
    //Initialize CAN rx to 250k bit/s
    myCan.begin();
@@ -171,7 +171,7 @@ void setup() {
    attachInterrupt(digitalPinToInterrupt(LSM6DSM_intPin2), accelgyroIntHandler, CHANGE);
    attachInterrupt(digitalPinToInterrupt(LIS2MDL_intPin), magIntHandler, CHANGE);
    coolingTimer.priority(130); //lower priority than other interrupts
-   coolingTimer.begin(cooling, 500000);
+   coolingTimer.begin(cooling, 500000); //timer interval in us
 }
 
 void loop() {
@@ -240,7 +240,7 @@ void loop() {
     cli();
     if (!time_computed)
       updateTime();
-    sprintf(databuf, "5 %d %d-%d-%d-%d", cooling_val, cur_hour, cur_min, cur_second, cur_millis);
+    sprintf(databuf, "5 %d %d %d-%d-%d-%d", cooling_val, cooling_counter, cur_hour, cur_min, cur_second, cur_millis);
     Serial.println(databuf);
     cooling_delta = false;
     digitalWrite(ledPin, cooling_counter %2);
@@ -276,7 +276,7 @@ void cooling(){
   //Rotate through the 4 thermistors at 2 Hz
   cooling_counter++;
   cooling_counter %= 4;
-
+  //myCan.begin();
   //notify program we have data to send
   cooling_delta = true; 
 }
