@@ -72,6 +72,7 @@ CAN_message_t msg;
 
 int cur_hour, cur_min, cur_second;
 int cur_millis;
+int millis_off;//offset because millis doesn't line up with rtc
 bool time_computed = false; //jank fix to time crashing in accelerometer
 
 //Cooling loop stuff
@@ -85,8 +86,36 @@ volatile uint8_t cooling_counter = 0;
 volatile bool cooling_delta = false;
 volatile char cooling_data[128];
 
+#define SPS_SENSORPIN 21 //steering position sensor pin
+IntervalTimer steeringTimer;
+volatile int steering_val = 0;
+volatile bool steering_delta = false;
+
 int ledPin = 13;
 
+//syncs rtc with raspberry pi
+//pi CANNOT be connected to internet
+//waits for handshake then sends current time
+void timesync(){
+  char serialbuf = Serial.read();
+  while (serialbuf == 255){
+    serialbuf = Serial.read();
+    delay(500);
+  }
+  //while (millis()%1000 != 0);
+  uint8_t initialsecond = second();
+  while(second() == initialsecond);
+  millis_off = millis()%1000;
+  //erial.print("At 0 millis, millis is: ");
+  //Serial.println(millis_off);
+
+  //Remove year+1 for actual testing 
+  sprintf(databuf, "%d-%02d-%02dT%02d:%02d:%02d", year(), month(), day()
+    , hour()%12, minute(),second());
+  Serial.println(databuf);
+  delay(100);
+  
+}
 void setup() {
   // put your setup code here, to run once:
 
@@ -97,6 +126,7 @@ void setup() {
   Serial.begin(115200);
   delay(100);
 
+  timesync();
   pinMode(ledPin, OUTPUT);
 
   //set thermistor analog inputs
@@ -113,25 +143,26 @@ void setup() {
   pinMode(LSM6DSM_intPin1, INPUT);
   pinMode(LSM6DSM_intPin2, INPUT);
   pinMode(LIS2MDL_intPin, INPUT);
+  pinMode(SPS_SENSORPIN, INPUT);
   //I2C pins for accelerometer
   Wire1.setSCL(16);
   Wire1.setSDA(17);
   Wire1.begin();
 
-  LSM6DSM.I2Cscan();
+  //LSM6DSM.I2Cscan();
   // Read the LSM6DSM Chip ID register, this is a good test of communication
-  Serial.println("LSM6DSM accel/gyro...");
+  //Serial.println("LSM6DSM accel/gyro...");
   byte c = LSM6DSM.getChipID();  // Read CHIP_ID register for LSM6DSM
-  Serial.print("LSM6DSM "); Serial.print("I AM "); Serial.print(c, HEX); Serial.print(" I should be "); Serial.println(0x6A, HEX);
+  //Serial.print("LSM6DSM "); Serial.print("I AM "); Serial.print(c, HEX); Serial.print(" I should be "); Serial.println(0x6A, HEX);
   //Serial.println(" ");
   delay(100); 
 
   
   // Read the LIS2MDL Chip ID register, this is a good test of communication
-  Serial.println("LIS2MDL mag...");
+  //Serial.println("LIS2MDL mag...");
   byte d = LIS2MDL.getChipID();  // Read CHIP_ID register for LSM6DSM
-  Serial.print("LIS2MDL "); Serial.print("I AM "); Serial.print(d, HEX); Serial.print(" I should be "); Serial.println(0x40, HEX);
-  Serial.println(" ");
+  //Serial.print("LIS2MDL "); Serial.print("I AM "); Serial.print(d, HEX); Serial.print(" I should be "); Serial.println(0x40, HEX);
+  //Serial.println(" ");
   delay(1000); 
 
   LSM6DSM.reset();  
@@ -141,11 +172,11 @@ void setup() {
    
   //LSM6DSM.selfTest();
   LSM6DSM.init(Ascale, Gscale, AODR, GODR);
-  LSM6DSM.selfTest();
+ // LSM6DSM.selfTest();
 
   //LSM6DSM.offsetBias(gyroBias, accelBias);
-  Serial.println("accel biases (mg)"); Serial.println(1000.0f * accelBias[0]); Serial.println(1000.0f * accelBias[1]); Serial.println(1000.0f * accelBias[2]);
-  Serial.println("gyro biases (dps)"); Serial.println(gyroBias[0]); Serial.println(gyroBias[1]); Serial.println(gyroBias[2]);
+  //Serial.println("accel biases (mg)"); Serial.println(1000.0f * accelBias[0]); Serial.println(1000.0f * accelBias[1]); Serial.println(1000.0f * accelBias[2]);
+  //Serial.println("gyro biases (dps)"); Serial.println(gyroBias[0]); Serial.println(gyroBias[1]); Serial.println(gyroBias[2]);
   delay(100); 
 
   LIS2MDL.reset(); // software reset LIS2MDL to default registers
@@ -154,11 +185,11 @@ void setup() {
    
    LIS2MDL.init(MODR);
 
-   LIS2MDL.selfTest();
+   //LIS2MDL.selfTest();
 
    //LIS2MDL.offsetBias(magBias, magScale);
-   Serial.println("mag biases (mG)"); Serial.println(1000.0f * magBias[0]); Serial.println(1000.0f * magBias[1]); Serial.println(1000.0f * magBias[2]); 
-   Serial.println("mag scale (mG)"); Serial.println(magScale[0]); Serial.println(magScale[1]); Serial.println(magScale[2]); 
+   //Serial.println("mag biases (mG)"); Serial.println(1000.0f * magBias[0]); Serial.println(1000.0f * magBias[1]); Serial.println(1000.0f * magBias[2]); 
+   //Serial.println("mag scale (mG)"); Serial.println(magScale[0]); Serial.println(magScale[1]); Serial.println(magScale[2]); 
    delay(2000); // add delay to see results before serial spew of data
 
    //Initialize CAN rx to 250k bit/s
@@ -170,18 +201,23 @@ void setup() {
    attachInterrupt(digitalPinToInterrupt(LSM6DSM_intPin1), accelgyroIntHandler, CHANGE);
    attachInterrupt(digitalPinToInterrupt(LSM6DSM_intPin2), accelgyroIntHandler, CHANGE);
    attachInterrupt(digitalPinToInterrupt(LIS2MDL_intPin), magIntHandler, CHANGE);
+   steeringTimer.priority(130);
+   steeringTimer.begin(steering, 50000); //20 hz 
    coolingTimer.priority(130); //lower priority than other interrupts
    coolingTimer.begin(cooling, 500000); //timer interval in us
 }
 
 void loop() {
   cli();
+  //updateTime();
   if (myCan.read(msg)){
     
     //digitalWrite(ledPin, HIGH);
     //Serial.println("Message");
-    updateTime();
-    sprintf(databuf, "0 %4X %X/%X/%X/%X/%X/%X/%X/%X %d-%d-%d-%d", msg.id, msg.buf[0],msg.buf[1],  msg.buf[2],msg.buf[3],msg.buf[4],msg.buf[5],msg.buf[6],msg.buf[7], cur_hour, cur_min, cur_second, cur_millis);
+    //updateTime();
+//    sprintf(databuf, "0 %4X %X/%X/%X/%X/%X/%X/%X/%X %d-%d-%d-%d", msg.id, msg.buf[0],msg.buf[1],  msg.buf[2],msg.buf[3],msg.buf[4],msg.buf[5],msg.buf[6],msg.buf[7], cur_hour, cur_min, cur_second, cur_millis);
+sprintf(databuf, "0 %4X %X/%X/%X/%X/%X/%X/%X/%X", msg.id, msg.buf[0],msg.buf[1],  msg.buf[2],msg.buf[3],msg.buf[4],
+              msg.buf[5],msg.buf[6],msg.buf[7]);
     Serial.println(databuf);
     
   }
@@ -193,8 +229,8 @@ void loop() {
     newLSM6DSMData = false;
     LSM6DSM.readData(LSM6DSMData);
 
-    if (!time_computed)
-      updateTime();
+//    if (!time_computed)
+//      updateTime();
 
     // Now we'll calculate the accleration value into actual g's
      ax = (float)LSM6DSMData[4]*aRes - accelBias[0];  // get actual g value, this depends on scale being set
@@ -210,8 +246,10 @@ void loop() {
      //can calculate these off car
 
      //slight formatting
-     sprintf(databuf, "3 %4f %4f %4f %4f %4f %4f %4f %4f %4f %d-%d-%d-%d", (int)1000*ax, (int)1000*ay, (int)1000*az, gx, gy, gz, 
-              (int)1000*mx, (int)1000*my, (int)1000*mz, cur_hour, cur_min, cur_second, cur_millis);
+//     sprintf(databuf, "3 %4f %4f %4f %4f %4f %4f %4f %4f %4f %d-%d-%d-%d", (int)1000*ax, (int)1000*ay, (int)1000*az, gx, gy, gz, 
+//              (int)1000*mx, (int)1000*my, (int)1000*mz, cur_hour, cur_min, cur_second, cur_millis);
+     sprintf(databuf, "3 %4f %4f %4f %4f %4f %4f %4f %4f %4f", (int)1000*ax, (int)1000*ay, (int)1000*az, gx, gy, gz, 
+              (int)1000*mx, (int)1000*my, (int)1000*mz);
      Serial.println(databuf);
      sei();
   }
@@ -235,12 +273,20 @@ void loop() {
      }
      sei();
   }
+  if (steering_delta){
+    cli();
+    sprintf(databuf, "7 %d", steering_val);
+    Serial.println(databuf);
+    steering_delta = false;
+    sei();
+  }
 
   if (cooling_delta){
     cli();
-    if (!time_computed)
-      updateTime();
-    sprintf(databuf, "5 %d %d %d-%d-%d-%d", cooling_val, cooling_counter, cur_hour, cur_min, cur_second, cur_millis);
+//    if (!time_computed)
+//      updateTime();
+    //sprintf(databuf, "5 %d %d %d-%d-%d-%d", cooling_val, cooling_counter, cur_hour, cur_min, cur_second, cur_millis);
+    sprintf(databuf, "5 %d %d", cooling_val, cooling_counter);
     Serial.println(databuf);
     cooling_delta = false;
     digitalWrite(ledPin, cooling_counter %2);
@@ -281,16 +327,21 @@ void cooling(){
   cooling_delta = true; 
 }
 
+void steering(){
+  steering_val = analogRead(SPS_SENSORPIN);
+  steering_delta = true;
+}
+
 //Only should update time once per loop
 //Also only if there is data available to be sent
 void updateTime(){
-  cli();
+  //cli();
   cur_hour = hour();
   cur_min = minute();
   cur_second = second();
-  cur_millis = millis() %1000;
+  cur_millis = (millis()-millis_off)%1000;
   time_computed = true;
-  sei();
+  //sei();
 }
 
   
