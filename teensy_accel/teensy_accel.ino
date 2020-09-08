@@ -1,6 +1,5 @@
 /*Joe Lopez Illini Formula Electric 2020
  * Logging input from CAN, 9-DOF accelerometer, Cooling loop thermistors
- * the code aint jank, the programmer is
  * code for accelerometer adapted from Kris Winer's LSM6DSM library for arduino
  * https://github.com/kriswiner/LSM6DSM_LIS2MDL_LPS22HB 
  */
